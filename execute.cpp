@@ -2,5 +2,8 @@
 #include "init.h"
 void Loop()
 {
-    
+    while(true)
+    {
+        init();
+    }
 }
