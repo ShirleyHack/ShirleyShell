@@ -1,0 +1,2 @@
+void SetUp();
+void PrintWelcome();
