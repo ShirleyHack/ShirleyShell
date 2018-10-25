@@ -3,21 +3,37 @@
 #include <signal.h>
 
 #include "def.h"
-void sigint_handler(int sig)
+void SIGINTHandler(int sig)
 {
-    char pathbuf[PATH_BUFSIZE];
+    char pathbuf[kPathBufSize];
     getcwd(pathbuf, sizeof(pathbuf));
     printf("\n[ShirleyShell]:\e[34m%s$ ", pathbuf);
 }
 void SetUp()
 {
-    signal(SIGINT, sigint_handler);
+    signal(SIGINT, SIGINTHandler);
     signal(SIGQUIT, SIG_IGN);
 }
+
 void init()
 {
-    sigint_handler(0);
+    int i, j;
+    SIGINTHandler(0);
     fflush(stdout);
+    memset(cmdline, 0, sizeof(cmdline));
+    memset(argsstore, 0, sizeof(argsstore));
+    memset(infile, 0, sizeof(infile));
+    memset(outfile, 0, sizeof(outfile));
+    lineptr = cmdline;
+    argsptr = argsstore;
+    append = -1;
+    isbackgnd = false;
+    parsedcmd = 0;
+    for(i = 0; i < kCmdSize; i++)
+    {
+        InitCmd(&cmd[i]);
+    }
+    lastpid = 0;
 }
 void PrintWelcome()
 {
