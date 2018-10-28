@@ -1,20 +1,36 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <signal.h>
+#include <string.h>
+#include "./def.h"
+#include "./externs.h"
+#include "./init.h"
 
-#include "def.h"
 void SIGINTHandler(int sig)
 {
     char pathbuf[kPathBufSize];
     getcwd(pathbuf, sizeof(pathbuf));
-    printf("\n[ShirleyShell]:\e[34m%s$ ", pathbuf);
+    printf("\e[1;32m[ShirleyShell]:\e[1;34m%s$ \033[0m", pathbuf);
+    fflush(stdout);
 }
 void SetUp()
 {
     signal(SIGINT, SIGINTHandler);
-    signal(SIGQUIT, SIG_IGN);
+    signal(SIGQUIT, SIGINTHandler);
 }
-
+extern void InitCmd(Command* cmd)
+{
+    int i = 0;
+    while(cmd->args[i] != NULL)
+    {
+        cmd->args[i] = NULL;
+        i++;
+    }
+    cmd->append = false;
+    cmd->next = NULL;
+    cmd->infd = 0;
+    cmd->outfd = 1;
+}
 void init()
 {
     int i, j;
@@ -33,9 +49,10 @@ void init()
     {
         InitCmd(&cmd[i]);
     }
-    lastpid = 0;
+    curcmd = NULL;
+    cmdfree = NULL;
 }
 void PrintWelcome()
 {
-    printf("Welcome to ShirleyShell~\n");
+    printf("\nWelcome to ShirleyShell~\n");
 }

@@ -3,13 +3,19 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
-#include "def.h"
-#include "exam.h"
-#include "execute.h"
-#include "externs.h"
-#include "init.h"
+#include <sys/types.h>
+#include <stdint.h>
+#include <sys/wait.h>
+#include <string.h>
+#include "./def.h"
+#include "./externs.h"
+#include "./init.h"
+#include "./exam.h"
+#include "./execute.h"
 
-void GetName(char* filename)
+void ForkExec(Command* cmd);
+int FreeCmd(Command* cmd, int index);
+void GetName(char *filename)
 {
     while(*lineptr == ' ' || *lineptr == '\t')
         lineptr++;
@@ -24,82 +30,17 @@ void GetName(char* filename)
     *filename = '\0';
 }
 
-void GetCommand(int i)
-{
-    int j = 0, k = 0;
-    bool isend = false;
-    Command* command = (Command*)malloc(sizeof(Command));
-    InitCmd(command);
-    curcmd = &cmd[parsedcmd];
-    for(; k < i; k++)
-    {
-        if(curcmd == NULL)
-        {
-            fprintf(stderr, "Getcommand error!");
-            return;
-        }
-        if(curcmd->next != NULL)
-            curcmd = curcmd->next;
-        else
-        {
-            curcmd->next = command;
-            break;
-        }
-    }
-    while(*lineptr != '\0')
-    {
-        while(*lineptr == ' ' || *lineptr == '\t')
-            lineptr++;
-        curcmd->args[j] = argsptr;
-        while(*lineptr != '\0' && *lineptr != '\t'
-            && *lineptr != ' ' && *lineptr != '\n'
-            && *lineptr != '<' && *lineptr != '>'
-            && *lineptr != '|' && *lineptr != '&')
-        {
-            *argsptr++ = *lineptr++;
-            isend = true;
-        }
-        *argsptr++ = '\0';
-        switch(*lineptr)
-        {
-            case ' ':
-            case '\t':
-                isend = false;
-                j++;
-                break;
-            case '<':
-            case '>':
-            case '|':
-            case '&':
-            case '\n':
-                if(isend == true)
-                    curcmd->args[j] = NULL;
-            default:
-                return;
-        }
-    }
-}
-
 void Loop()
 {
     while(true)
     {
         init();
         if(ReadCommand() == -1)
-        {
-            printf("Failed to read command\n.");
             break;
-        }
         if(ParseCommand() == -1)
-        {
-            printf("Failed to parse command\n.");
-            break;
-        }
+            printf("Failed to parse command.\n");
         if(ExecuteCommand() == -1)
-        {
-            printf("Failed to execute command\n.");
-            break;
-        }
+            printf("Failed to execute command.\n");
     }
     printf("\nexit[ShirleyShell]\n");
 }
@@ -111,17 +52,19 @@ int ReadCommand()
 }
 int ParseCommand()
 {
+    strcpy(str, "\n");
     // 无命令
-    if(check("\n"))
+    if(check(str))
         return 0;
     // 判断是否内部命令
     if(IsBuiltin())
         return 0;
     GetCommand(0);
     // 判断是否有输入重定向
-    if(check("<"))
+    strcpy(str, "<");
+    if(check(str))
     {
-        if(check("<"))
+        if(check(str))
         {
             /*wait for supplementation*/
         }
@@ -132,9 +75,10 @@ int ParseCommand()
     int i;
     for(i = 1; i < kPipeSize; i++)
     {
-        if(check("|"))
+        strcpy(str, "|");
+        if(check(str))
         {
-            if(check("|"))
+            if(check(str))
             {
                 /*wait for supplementation*/
             }
@@ -146,16 +90,19 @@ int ParseCommand()
     }
 
     // 判断是否有输出重定向
-    if(check(">"))
+    strcpy(str, ">");
+    if(check(str))
     {
-        if(check(">"))
+        if(check(str))
             cmd[parsedcmd].append = true;
         GetName(outfile[parsedcmd]);
     }
     // 判断是否后台作业--对应着最后一条command
-    if(check("&"))
+    strcpy(str, "&");
+    if(check(str))
     {
-        if(check("\n"))
+        strcpy(str, "\n");
+        if(check(str))
         {
             parsedcmd++;
             isbackgnd = true;
@@ -163,31 +110,30 @@ int ParseCommand()
         }
         else
         {
-            fprintf(strerr, "Syntax error: &");
+            strcpy(str, "&");
+            if(check(str))
+            {
+                parsedcmd++;
+                ParseCommand();
+            }
+            else
+                fprintf(stderr, "Syntax error: &\n");
         }
     }
     // 判断命令结束
-    if(check("\n"))
+    strcpy(str, ";");
+    if(check(str))
     {
-
+        parsedcmd++;
+        ParseCommand();
     }
-    else
+    strcpy(str, "\n");
+    if(check(str))
     {
-        if(check(";") || check("&&"))
-        {
-            parsedcmd++;
-            ParseCommand();
-        }
-        // else if(check("&&"))
-        //     ParseCommand();
-        // else if(check("||"))
-        //     ParseCommand("||");
-        else
-        {
-            fprintf(stderr, "Command line syntax error\n");
-            return -1;
-        }
+        parsedcmd++;
+        return parsedcmd;
     }
+    return 0;
 }
 
 int ExecuteCommand()
@@ -197,6 +143,7 @@ int ExecuteCommand()
     {
         // 没有命令
         curcmd = &cmd[numcmd];
+        // printf("first:%d\n", curcmd->args[0] == NULL);
         if(curcmd->args[0] == NULL)
         {
             numcmd++;
@@ -208,8 +155,8 @@ int ExecuteCommand()
         if(outfile[numcmd][0] != '\0')
         {
             if(curcmd->append)
-                curcmd->outfd = open(outfile[numcmd], OWRONLY | O_CREAT
-                    | O_AAPPEND, 0666);
+                curcmd->outfd = open(outfile[numcmd], O_WRONLY | O_CREAT
+                    | O_APPEND, 0666);
             else
                 curcmd->outfd = open(outfile[numcmd], O_WRONLY | O_CREAT
                     | O_TRUNC, 0666);
@@ -220,74 +167,131 @@ int ExecuteCommand()
         else
             signal(SIGCHLD, SIG_DFL);
 
+        int fd;
         int fds[2];
-        while(curcmd->args[0] != NULL)
+        while(curcmd != NULL && curcmd->args[0] != NULL)
         {
             if(curcmd->next != NULL)
             {
                 pipe(fds);
-                curcmd->infd = fds[0];
                 curcmd->outfd = fds[1];
+                // !curcmd->next
+                curcmd->next->infd = fds[0];
             }
 
-            forkexec(curcmd);
+            ForkExec(curcmd);
+            // printf("curcmd->infd: %d\ncurcmd->outfd", curcmd->infd, curcmd->outfd);
+            if((fd = curcmd->infd) != 0)
+                close(fd);
 
-            if(curcmd->infd != 0)
-                close(curcmd);
-
-            if(curcmd->outfd != 1)
-                close(outfd);
+            if((fd = curcmd->outfd) != 1)
+                close(fd);
+            curcmd = curcmd->next;
         }
-
-        if(isbackgnd)
+        // curcmd = &cmd[numcmd];
+        if(FreeCmd(cmd[numcmd].next, 0) < 0)
         {
-            while(wait(NULL) != lastpid)
-            {}
+            printf("Failed to free Command.\n");
         }
-        curcmd = curcmd->next;
+        numcmd++;
     }
     return 0;
 }
 
-void forkexec(Command* cmd)
+int FreeCmd(Command* cmd, int index)
+{
+    if(cmd == NULL)
+    {
+        if(index == 0)
+            return 0;
+        return -1;
+    }
+    if(cmd->next != NULL)
+        FreeCmd(cmd->next, index+1);
+    free(cmd);
+    return 0;
+}
+
+void ForkExec(Command* cmd)
 {
     int status = 1;
     pid_t pid;
-    pid = fork();
-    if(pid < 0)
-        fprintf(strerr, "Fork failed\n");
 
+    int k = 0;
+    while(cmd->args[k] != NULL)
+    {
+        printf("args[%d]:%s  ", k, cmd->args[k]);
+        k++;
+    }
+    printf("\n");   
+ 
+    pid = fork();
+    // printf("fork command:\ncmd[0].args[0]:%s    \n", cmd[0].args[0]);
+    // printf("pid_origin: %lu\n", pid);
+    // printf("getpid_origin: %lu\n", getpid());
+
+    if(pid < 0)
+        fprintf(stderr, "Fork failed\n");
     else if(pid == 0)
     {
+        // if(cmd->infd == 0 && isbackgnd)
+        //     cmd->infd = open("/dev/null", O_RDONLY);
+
+        // printf("child: %lu\n", getpid());
         signal(SIGINT, SIG_DFL);
         signal(SIGTSTP, SIG_DFL);
         signal(SIGCONT, SIG_DFL);
-        dup2(cmd->infd, 0);
-        dup2(cmd->outfd, 1);
         if(cmd->infd != 0)
-            close(cmd->infd);
-        if(cmd->outfd != 0)
-            close(cmd->outfd);
+        {
+            close(0);
+            dup(cmd->infd);
+        }
+        // !!!Wrong condiction lead to wrongly closing!!!
+        if(cmd->outfd != 1)
+        {
+            close(1);
+            dup(cmd->outfd);
+        }
+        // printf("child continue1\n");
+
+        int j;
+        for(j = 3; j < kOpenMax; j++)
+            close(j);
+
+        // if(!isbackgnd)
+        // {
+        //     printf("isbackgnd: %d\n", isbackgnd);
+        //     signal(SIGINT, SIG_DFL);
+        //     signal(SIGQUIT, SIG_DFL);
+        // }
+
+        // printf("child continue2\n");
+
+        // printf("[%d]end\n", k);
+        // printf("child continue3\n");
         if(execvp(cmd->args[0], cmd->args) < 0)
-            fprintf(strerr, " *** ERROR: exec %s failed\n", segment->args[0]);
+            fprintf(stderr, " *** ERROR: exec %s failed\n", cmd->args[0]);
+        // printf("child continue4\n");
+        exit(EXIT_SUCCESS);
     }
     // 父进程
     else
     {
+        // printf("parent: %lu\n", getpid());
+        // printf("isback: %d, cur_pid: %lu\n", isbackgnd, pid);        
         signal(SIGINT, SIG_IGN);
         signal(SIGTSTP, SIG_IGN);
         signal(SIGCONT, SIG_DFL);
         if(isbackgnd)
+        {
             signal(SIGCHLD, SIG_IGN);
+            // ProcessNode *p = (ProcessNode*)malloc(sizeof(ProcessNode));
+            // p->pid = pid;
+            // ProcessNode *tmp = head->next;
+            // head->next = p;
+            // p->next = tmp;
+        }
         else
             waitpid(pid, &status, WUNTRACED);
-        if(cmd->infd != 0){
-            close(cmd->infd);
-        }
-        if(cmd->outfd != 1){
-            close(cmd->outfd);
-        }
     }
-    return 1;
-
 }
